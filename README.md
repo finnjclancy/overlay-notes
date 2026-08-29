@@ -5,7 +5,7 @@ Overlay Notes is a native macOS notes overlay that stays visible above other app
 ## Features
 
 - Always-on-top floating notes window
-- Edit mode and transparent read-only overlay mode
+- Normal edit, transparent edit, and click-through read-only modes
 - Global shortcuts to show or hide the window, switch mode, and cycle text color
 - Adjustable text size
 - Preserved pasted formatting for tabs, line breaks, and bullets
@@ -28,7 +28,7 @@ The built app bundle is created at `dist/Overlay Notes.app`.
 ## Shortcuts
 
 - `Control + Option + Command + N`: show or hide the window
-- `Control + Option + Command + R`: toggle edit and read-only mode
+- `Control + Option + Command + R`: cycle normal edit, transparent edit, and read-only mode
 - `Control + Option + Command + C`: cycle text color
 
 ## Requirements

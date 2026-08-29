@@ -77,6 +77,64 @@ enum TextColorChoice: String {
     }
 }
 
+enum OverlayMode: String {
+    case normalEdit
+    case transparentEdit
+    case readOnly
+
+    var next: OverlayMode {
+        switch self {
+        case .normalEdit:
+            return .transparentEdit
+        case .transparentEdit:
+            return .readOnly
+        case .readOnly:
+            return .normalEdit
+        }
+    }
+
+    var isEditable: Bool {
+        self != .readOnly
+    }
+
+    var isTransparent: Bool {
+        self != .normalEdit
+    }
+
+    var segmentIndex: Int {
+        switch self {
+        case .normalEdit:
+            return 0
+        case .transparentEdit:
+            return 1
+        case .readOnly:
+            return 2
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .normalEdit:
+            return "Normal Edit"
+        case .transparentEdit:
+            return "Transparent Edit"
+        case .readOnly:
+            return "Read-Only"
+        }
+    }
+
+    static func fromSegment(_ index: Int) -> OverlayMode {
+        switch index {
+        case 0:
+            return .normalEdit
+        case 1:
+            return .transparentEdit
+        default:
+            return .readOnly
+        }
+    }
+}
+
 @MainActor
 final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextViewDelegate {
     private static let frameAutosaveName = "OverlayNotes.WindowFrame"
@@ -90,7 +148,7 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
     private let scrollView = NSScrollView()
     private let textView = NotesTextView()
     private let placeholderLabel = NSTextField(labelWithString: "Paste notes here")
-    private let modeControl = NSSegmentedControl(labels: ["E", "R"], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl(labels: ["E", "T", "R"], trackingMode: .selectOne, target: nil, action: nil)
     private let colorControl = NSSegmentedControl(labels: ["B", "W", "G", "R", "Y", "U"], trackingMode: .selectOne, target: nil, action: nil)
     private let fontSizeLabel = NSTextField(labelWithString: "")
     private let fontSizeDownButton = NSButton(title: "-", target: nil, action: nil)
@@ -98,13 +156,13 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
 
     private var activeSpaceObserver: NSObjectProtocol?
     private var hasPlacedWindow = false
-    private var isReadOnlyMode: Bool
+    private var mode: OverlayMode
     private var fontSize: CGFloat
     private var textColorChoice: TextColorChoice
     private var controlsHeightConstraint: NSLayoutConstraint?
 
     var onVisibilityChange: (@MainActor (Bool) -> Void)?
-    var onReadOnlyModeChange: (@MainActor (Bool) -> Void)?
+    var onModeChange: (@MainActor (OverlayMode) -> Void)?
     var onFontSizeChange: (@MainActor (CGFloat) -> Void)?
     var onTextColorChange: (@MainActor (TextColorChoice) -> Void)?
 
@@ -114,12 +172,12 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
 
     init(
         notesStore: NotesStore,
-        isReadOnlyMode: Bool,
+        mode: OverlayMode,
         fontSize: CGFloat,
         textColorChoice: TextColorChoice
     ) {
         self.notesStore = notesStore
-        self.isReadOnlyMode = isReadOnlyMode
+        self.mode = mode
         self.fontSize = fontSize
         self.textColorChoice = textColorChoice
 
@@ -152,38 +210,33 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
     }
 
     func showWindowAndFocus() {
-        guard let window else {
+        guard let panel = window as? OverlayPanel else {
             return
         }
 
-        placeWindowIfNeeded(window)
+        placeWindowIfNeeded(panel)
         keepWindowPinned()
-        window.orderFrontRegardless()
 
-        if isReadOnlyMode {
-            window.orderFront(nil)
+        if !mode.isEditable {
+            panel.orderFrontRegardless()
         } else {
-            showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(textView)
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(textView)
         }
 
         onVisibilityChange?(true)
     }
 
     func hideWindow() {
+        notesStore.flush()
         window?.orderOut(nil)
         onVisibilityChange?(false)
     }
 
-    func setReadOnlyMode(_ isReadOnlyMode: Bool) {
-        guard self.isReadOnlyMode != isReadOnlyMode else {
-            return
-        }
-
-        self.isReadOnlyMode = isReadOnlyMode
+    func cycleMode() {
+        mode = mode.next
         applyPresentationMode()
+        onModeChange?(mode)
     }
 
     func cycleTextColor() {
@@ -217,9 +270,9 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
     }
 
     @objc private func modeControlChanged(_ sender: NSSegmentedControl) {
-        let shouldBeReadOnly = sender.selectedSegment == 1
-        setReadOnlyMode(shouldBeReadOnly)
-        onReadOnlyModeChange?(shouldBeReadOnly)
+        mode = OverlayMode.fromSegment(sender.selectedSegment)
+        applyPresentationMode()
+        onModeChange?(mode)
     }
 
     @objc private func colorControlChanged(_ sender: NSSegmentedControl) {
@@ -356,7 +409,7 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
 
             modeControl.topAnchor.constraint(equalTo: controlsContainer.topAnchor),
             modeControl.leadingAnchor.constraint(equalTo: controlsContainer.leadingAnchor),
-            modeControl.widthAnchor.constraint(equalToConstant: 50),
+            modeControl.widthAnchor.constraint(equalToConstant: 72),
 
             colorControl.centerYAnchor.constraint(equalTo: modeControl.centerYAnchor),
             colorControl.leadingAnchor.constraint(equalTo: modeControl.trailingAnchor, constant: 4),
@@ -412,37 +465,33 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
             return
         }
 
-        var styleMask = panel.styleMask
-        if isReadOnlyMode {
-            styleMask.insert(.nonactivatingPanel)
-        } else {
-            styleMask.remove(.nonactivatingPanel)
-        }
-        panel.styleMask = styleMask
+        let isEditable = mode.isEditable
+        let isTransparent = mode.isTransparent
+
         updateStandardButtonsVisibility(for: panel)
 
-        controlsContainer.isHidden = isReadOnlyMode
-        controlsHeightConstraint?.constant = isReadOnlyMode ? 0 : 18
+        controlsContainer.isHidden = isTransparent
+        controlsHeightConstraint?.constant = isTransparent ? 0 : 18
 
-        panel.allowsKeyFocus = !isReadOnlyMode
-        panel.ignoresMouseEvents = false
-        panel.hasShadow = !isReadOnlyMode
+        panel.allowsKeyFocus = isEditable
+        panel.ignoresMouseEvents = !isEditable
+        panel.hasShadow = !isTransparent
 
-        modeControl.selectedSegment = isReadOnlyMode ? 1 : 0
+        modeControl.selectedSegment = mode.segmentIndex
         colorControl.selectedSegment = textColorChoice.segmentIndex
         fontSizeLabel.stringValue = "\(Int(fontSize))"
 
-        textView.isEditable = !isReadOnlyMode
-        textView.isSelectable = !isReadOnlyMode
-        textView.allowsEditingInteraction = !isReadOnlyMode
+        textView.isEditable = isEditable
+        textView.isSelectable = isEditable
+        textView.allowsEditingInteraction = isEditable
         textView.font = .systemFont(ofSize: fontSize)
         placeholderLabel.font = .systemFont(ofSize: fontSize)
 
-        fontSizeDownButton.isEnabled = !isReadOnlyMode
-        fontSizeUpButton.isEnabled = !isReadOnlyMode
-        colorControl.isEnabled = !isReadOnlyMode
+        fontSizeDownButton.isEnabled = isEditable
+        fontSizeUpButton.isEnabled = isEditable
+        colorControl.isEnabled = isEditable
 
-        if isReadOnlyMode {
+        if isTransparent {
             rootView.layer?.backgroundColor = NSColor.clear.cgColor
             editorBackground.layer?.borderColor = NSColor.clear.cgColor
             editorBackground.layer?.backgroundColor = NSColor.clear.cgColor
@@ -451,9 +500,8 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
             textView.drawsBackground = false
             textView.backgroundColor = .clear
             textView.textColor = textColorChoice.color
-            textView.insertionPointColor = .clear
+            textView.insertionPointColor = isEditable ? textColorChoice.color : .clear
             placeholderLabel.textColor = textColorChoice.placeholderColor
-            panel.makeFirstResponder(nil)
         } else {
             let backgroundColor = editorBackgroundColor()
             rootView.layer?.backgroundColor = backgroundColor.cgColor
@@ -466,9 +514,16 @@ final class NotesWindowController: NSWindowController, NSWindowDelegate, NSTextV
             textView.textColor = textColorChoice.color
             textView.insertionPointColor = textColorChoice.color
             placeholderLabel.textColor = textColorChoice.placeholderColor
+        }
 
-            if panel.isVisible {
+        if panel.isVisible {
+            if isEditable {
+                panel.makeKeyAndOrderFront(nil)
                 panel.makeFirstResponder(textView)
+            } else {
+                panel.makeFirstResponder(nil)
+                panel.resignKey()
+                panel.orderFrontRegardless()
             }
         }
     }

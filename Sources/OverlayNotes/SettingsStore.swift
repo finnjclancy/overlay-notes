@@ -3,6 +3,7 @@ import Foundation
 final class SettingsStore {
     private enum Keys {
         static let isReadOnlyMode = "OverlayNotes.isReadOnlyMode"
+        static let overlayMode = "OverlayNotes.overlayMode"
         static let fontSize = "OverlayNotes.fontSize"
         static let textColorChoice = "OverlayNotes.textColorChoice"
     }
@@ -13,9 +14,15 @@ final class SettingsStore {
         self.defaults = defaults
     }
 
-    var isReadOnlyMode: Bool {
-        get { defaults.bool(forKey: Keys.isReadOnlyMode) }
-        set { defaults.set(newValue, forKey: Keys.isReadOnlyMode) }
+    var overlayMode: String {
+        get {
+            if let mode = defaults.string(forKey: Keys.overlayMode) {
+                return mode
+            }
+
+            return defaults.bool(forKey: Keys.isReadOnlyMode) ? "readOnly" : "normalEdit"
+        }
+        set { defaults.set(newValue, forKey: Keys.overlayMode) }
     }
 
     var fontSize: CGFloat {

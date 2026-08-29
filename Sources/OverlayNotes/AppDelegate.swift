@@ -11,13 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var colorHotKeyManager: HotKeyManager?
     private var statusItem: NSStatusItem?
     private var toggleMenuItem: NSMenuItem?
-    private var readOnlyMenuItem: NSMenuItem?
+    private var modeMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         bootstrapIfNeeded()
         notesWindowController?.showWindowAndFocus()
         updateMenuState(isVisible: notesWindowController?.isWindowVisible == true)
-        updateReadOnlyMenuState()
+        updateModeMenuState()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -39,13 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notesWindowController?.toggleVisibility()
     }
 
-    @objc private func toggleReadOnlyMode(_ sender: Any?) {
+    @objc private func cycleMode(_ sender: Any?) {
         bootstrapIfNeeded()
-
-        let isReadOnlyMode = !(settingsStore?.isReadOnlyMode ?? false)
-        settingsStore?.isReadOnlyMode = isReadOnlyMode
-        notesWindowController?.setReadOnlyMode(isReadOnlyMode)
-        updateReadOnlyMenuState()
+        notesWindowController?.cycleMode()
     }
 
     @objc private func cycleTextColor(_ sender: Any?) {
@@ -75,13 +71,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleMenuItem.target = self
         menu.addItem(toggleMenuItem)
 
-        let readOnlyMenuItem = NSMenuItem(
-            title: "Read-Only Overlay",
-            action: #selector(toggleReadOnlyMode(_:)),
+        let modeMenuItem = NSMenuItem(
+            title: "",
+            action: #selector(cycleMode(_:)),
             keyEquivalent: ""
         )
-        readOnlyMenuItem.target = self
-        menu.addItem(readOnlyMenuItem)
+        modeMenuItem.target = self
+        menu.addItem(modeMenuItem)
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -95,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         self.statusItem = statusItem
         self.toggleMenuItem = toggleMenuItem
-        self.readOnlyMenuItem = readOnlyMenuItem
+        self.modeMenuItem = modeMenuItem
     }
 
     private func updateMenuState(isVisible: Bool) {
@@ -107,8 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleMenuItem.title = "\(actionName) (Control + Option + Command + N)"
     }
 
-    private func updateReadOnlyMenuState() {
-        readOnlyMenuItem?.state = settingsStore?.isReadOnlyMode == true ? .on : .off
+    private func updateModeMenuState() {
+        let mode = OverlayMode(rawValue: settingsStore?.overlayMode ?? "") ?? .normalEdit
+        modeMenuItem?.title = "Mode: \(mode.displayName) (Control + Option + Command + R)"
     }
 
     private func bootstrapIfNeeded() {
@@ -121,18 +118,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if notesWindowController == nil, let notesStore, let settingsStore {
+            let mode = OverlayMode(rawValue: settingsStore.overlayMode) ?? .normalEdit
             let controller = NotesWindowController(
                 notesStore: notesStore,
-                isReadOnlyMode: settingsStore.isReadOnlyMode,
+                mode: mode,
                 fontSize: settingsStore.fontSize,
                 textColorChoice: TextColorChoice(rawValue: settingsStore.textColorChoice) ?? .white
             )
             controller.onVisibilityChange = { [weak self] isVisible in
                 self?.updateMenuState(isVisible: isVisible)
             }
-            controller.onReadOnlyModeChange = { [weak self] isReadOnlyMode in
-                self?.settingsStore?.isReadOnlyMode = isReadOnlyMode
-                self?.updateReadOnlyMenuState()
+            controller.onModeChange = { [weak self] mode in
+                self?.settingsStore?.overlayMode = mode.rawValue
+                self?.updateModeMenuState()
             }
             controller.onFontSizeChange = { [weak self] fontSize in
                 self?.settingsStore?.fontSize = fontSize
@@ -163,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 hotKeyID: 2
             ) { [weak self] in
                 Task { @MainActor [weak self] in
-                    self?.toggleReadOnlyMode(nil)
+                    self?.cycleMode(nil)
                 }
             }
         }
